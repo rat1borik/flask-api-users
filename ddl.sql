@@ -14,6 +14,6 @@ create table if not exists music(
     title varchar(50) not null,
     artist varchar(50) not null,
     album varchar(50) not null,
-    listen_amount integer default 0,
+    listen_amount integer not null default 0,
     release_date date not null
 )
