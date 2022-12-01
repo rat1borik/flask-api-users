@@ -43,7 +43,7 @@ def create_user():
         elif len(request.json['password']) < 8:
             return 'too weak password (minimum 8 symbols)', 422
         elif r.match(request.json['birthdate']) is None:
-            return 'wrong birthdate format (YYYY-MM-DD)', 422
+            return 'wrong birthdate format (needs YYYY-MM-DD)', 422
 
         newid = query_db('INSERT INTO users (username, birthdate, status, password, email) \
                             VALUES (?, date(?), ?, ?, ?) RETURNING id', cur, (request.json['username'],
@@ -65,7 +65,13 @@ def get_users():
     cur = get_db_connection()
 
     try:
-        users = query_db("select * from users", cur)
+        if request.content_type == 'application/json':
+            if 'id' in request.json and request.json['id'] != '':
+                users = query_db("SELECT * FROM users WHERE id = ?",
+                                 cur, (request.json['id'],))
+                return users
+            return 'no id', 400
+        users = query_db("SELECT * FROM users", cur)
         return users
     except Exception as err:
         return str(err), 500
@@ -74,7 +80,7 @@ def get_users():
 
 
 @app.route('/api/users/<int:id>', methods=['PUT'])
-def set_status(id):
+def update_user(id):
     cur = get_db_connection()
 
     try:
@@ -129,14 +135,137 @@ def auth_user():
         return 'no password', 400
 
     try:
-        res = query_db("SELECT case when ? = password then true else false end auth FROM users where username = ?",
+        res = query_db("SELECT case when ? = password then true else false end auth, id FROM users WHERE username = ?",
                        cur, (md5(str(request.json['password']).encode('utf-8')).hexdigest(), request.json['username']), True)
         if len(res) == 0:
             return 'no such user', 412
         if not res[0]['auth']:
-            return 'wrong password user', 401
+            return 'wrong password', 401
+        res = query_db("UPDATE users SET status = 'online' WHERE id = ?",
+                       cur, (res[0]['id'], ), True)
         return 'successful'
     except Exception as err:
         return str(err), 500
     finally:
         cur.close()
+
+# Music
+
+
+@app.route('/api/music', methods=['POST'])
+def create_music():
+    cur = get_db_connection()
+
+    try:
+
+        r = re.compile('\d\d\d\d-\d\d\-\d\d')
+
+        if 'title' not in request.json or request.json['title'] == '':
+            return 'no title', 400
+        elif 'releaseDate' not in request.json or request.json['releaseDate'] == '':
+            return 'no release date', 400
+        elif 'album' not in request.json or request.json['album'] == '':
+            return 'no album', 400
+        elif 'artist' not in request.json or request.json['artist'] == '':
+            return 'no artist', 400
+        elif r.match(request.json['releaseDate']) is None:
+            return 'wrong release date format (needs YYYY-MM-DD)', 422
+
+        newid = query_db('INSERT INTO music (title, release_date, artist, album) \
+                            VALUES (?, date(?), ?, ?) RETURNING id', cur, (request.json['title'],
+                                                                           request.json['releaseDate'],
+                                                                           request.json['artist'],
+                                                                           request.json['album']), True)
+
+        return newid
+    except Exception as err:
+        return str(err), 500
+    finally:
+        cur.close()
+
+
+@app.route('/api/music', methods=['GET'])
+def get_music():
+    cur = get_db_connection()
+
+    try:
+        if request.content_type == 'application/json':
+            if 'id' in request.json and request.json['id'] != '':
+                music = query_db("SELECT * FROM music WHERE id = ?",
+                                 cur, (request.json['id'],))
+                return music
+            return 'no id', 400
+        music = query_db("SELECT * FROM music", cur)
+        return music
+    except Exception as err:
+        return str(err), 500
+    finally:
+        cur.close()
+
+
+@app.route('/api/music/<int:id>', methods=['PUT'])
+def update_music(id):
+    cur = get_db_connection()
+
+    try:
+        for k, v in request.json.items():
+            if k not in ('title', 'album', 'artist'):
+                return 'wrong params to update', 422
+            elif v == '':
+                return 'value is empty', 422
+
+            res = query_db("UPDATE music SET " + k + " = ? WHERE id = ? RETURNING id",
+                           cur, (v, id), True)
+
+            if len(res) == 0:
+                return 'no such music', 412
+
+        return 'successful'
+    except Exception as err:
+        return str(err), 500
+    finally:
+        cur.close()
+
+
+@app.route('/api/music/<int:id>', methods=['DELETE'])
+def delete_music(id):
+    cur = get_db_connection()
+
+    try:
+        res = query_db("DELETE FROM music WHERE id = ? RETURNING id",
+                       cur, (id, ), True)
+        if len(res) == 0:
+            return 'no such music', 412
+        return 'successful'
+    except Exception as err:
+        return str(err), 500
+    finally:
+        cur.close()
+
+
+@app.route('/api/music/listen', methods=['POST'])
+def listen_music():
+    cur = get_db_connection()
+
+    if 'data' not in request.json or request.json['data'] == '':
+        return 'no data', 400
+    try:
+        res = query_db("SELECT id FROM music WHERE lower(title||coalesce(album, '')||coalesce(artist, '')) like lower('%" + request.json['data'] + "%') limit 1",
+                       cur)
+        if len(res) == 0:
+            return 'no such music', 412
+
+        id = res[0]['id']
+
+        res = query_db("UPDATE music SET listen_amount = listen_amount + 1 WHERE id = ? RETURNING id",
+                       cur, (id,), True)
+        return 'Mmm... Sounds nice'
+    except Exception as err:
+        return str(err), 500
+    finally:
+        cur.close()
+
+
+@app.route('/api/iamteapot', methods=['GET'])
+def i_am_teapot():
+    return 'Enjoy your tea', 418
